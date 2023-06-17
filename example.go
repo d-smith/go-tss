@@ -1,18 +1,20 @@
 package main
 
 import (
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"gotss/example/test"
 	"sync"
 
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/taurusgroup/multi-party-sig/pkg/ecdsa"
 	"github.com/taurusgroup/multi-party-sig/pkg/math/curve"
 	"github.com/taurusgroup/multi-party-sig/pkg/party"
 	"github.com/taurusgroup/multi-party-sig/pkg/pool"
 	"github.com/taurusgroup/multi-party-sig/pkg/protocol"
 	"github.com/taurusgroup/multi-party-sig/protocols/cmp"
+
+	"github.com/ethereum/go-ethereum/common/hexutil"
 )
 
 func CMPKeygen(id party.ID, ids party.IDSlice, threshold int, n *test.Network, pl *pool.Pool) (*cmp.Config, error) {
@@ -58,11 +60,19 @@ func CMPSign(c *cmp.Config, m []byte, signers party.IDSlice, n *test.Network, pl
 	}
 
 	signature := signResult.(*ecdsa.Signature)
-	sigBytes, err := signature.SigEthereum()
-	fmt.Println("eth sig from ", c.ID, " is ", base64.StdEncoding.EncodeToString(sigBytes))
+	sigEth, err := signature.SigEthereum()
+	fmt.Println("eth sig from ", c.ID, " is ", hexutil.Encode(sigEth))
 	if !signature.Verify(c.PublicPoint(), m) {
 		return errors.New("failed to verify cmp signature")
 	}
+
+	// Recover the public key from the signature
+	sigPublicKey, err := crypto.Ecrecover(m, sigEth)
+	if err != nil {
+		fmt.Println(err)
+	}
+	fmt.Println("public key from sig is", hexutil.Encode(sigPublicKey))
+
 	return nil
 }
 
@@ -107,6 +117,7 @@ func main() {
 	ids := party.IDSlice{"a", "b", "c"}
 	threshold := 2
 	messageToSign := []byte("hello")
+	hash := crypto.Keccak256Hash(messageToSign)
 
 	net := test.NewNetwork(ids)
 
@@ -116,7 +127,7 @@ func main() {
 		go func(id party.ID) {
 			pl := pool.NewPool(0)
 			defer pl.TearDown()
-			if err := All(id, ids, threshold, messageToSign, net, &wg, pl); err != nil {
+			if err := All(id, ids, threshold, hash.Bytes(), net, &wg, pl); err != nil {
 				fmt.Println(err)
 			}
 		}(id)
